@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">Local Calendar</string>
+    <string name="title_events">Events</string>
+    <string name="title_month">Month</string>
+    <string name="title_week">Week</string>
+    <string name="title_day">Day</string>
+    <string name="title_schedule">Schedule</string>
+    <string name="title_widgets">Widgets</string>
+    <string name="title_backup">Backup &amp; Restore</string>
+    <string name="title_sync">Google Calendar</string>
+    <string name="add_event">Add Event</string>
+    <string name="edit_event">Edit Event</string>
+    <string name="delete_event">Delete Event</string>
+    <string name="search_events">Search events…</string>
+    <string name="permission_rationale">Local Calendar needs calendar permission to read events from Google Calendar on this device. All data is kept 100% locally on your phone.</string>
+    <string name="widget_next_events_title">Local Calendar · Upcoming</string>
+    <string name="widget_next_events_description">Your next upcoming calendar events at a glance</string>
+    <string name="widget_month_title">Local Calendar · Month</string>
+    <string name="widget_month_description">A compact month grid for your calendar</string>
+</resources>

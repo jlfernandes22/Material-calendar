@@ -1,0 +1,6 @@
+{
+  "name": "Local Calendar",
+  "description": "A privacy-focused, local-first calendar with Google Calendar import, backup & export, interactive widgets, and Material 3 design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
