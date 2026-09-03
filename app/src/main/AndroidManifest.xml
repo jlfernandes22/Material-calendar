@@ -30,7 +30,7 @@
 
         <receiver
             android:name=".widget.NextEventsWidgetReceiver"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/widget_next_events_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -42,7 +42,7 @@
 
         <receiver
             android:name=".widget.MonthWidgetReceiver"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/widget_month_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

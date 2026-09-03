@@ -216,8 +216,14 @@ class BackupRestoreManager(
                 sb.append("DTSTART;VALUE=DATE:${dayFormat.format(Date(ev.startMillis))}\r\n")
                 sb.append("DTEND;VALUE=DATE:${dayFormat.format(Date(ev.endMillis))}\r\n")
             } else if (ev.timezone != null) {
-                sb.append("DTSTART;TZID=${ev.timezone}:${utcDateFormat.format(Date(ev.startMillis))}\r\n")
-                sb.append("DTEND;TZID=${ev.timezone}:${utcDateFormat.format(Date(ev.endMillis))}\r\n")
+                // RFC 5545: with a TZID, the value MUST be local time in that zone, never
+                // UTC (no trailing 'Z'). Formatting in UTC here would shift every timed
+                // event and make the file invalid for Google Calendar / other importers.
+                val tzFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone(ev.timezone)
+                }
+                sb.append("DTSTART;TZID=${ev.timezone}:${tzFormat.format(Date(ev.startMillis))}\r\n")
+                sb.append("DTEND;TZID=${ev.timezone}:${tzFormat.format(Date(ev.endMillis))}\r\n")
             } else {
                 sb.append("DTSTART:${utcDateFormat.format(Date(ev.startMillis))}\r\n")
                 sb.append("DTEND:${utcDateFormat.format(Date(ev.endMillis))}\r\n")

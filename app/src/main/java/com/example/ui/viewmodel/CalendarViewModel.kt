@@ -42,6 +42,7 @@ data class CalendarUiState(
     val isSearching: Boolean = false,
     val selectedCalendarFilter: Set<Long> = emptySet(),
     val selectedCategoryFilter: String? = null,
+    val hasCalendarPermission: Boolean = false,
     val isSyncing: Boolean = false,
     val syncResult: SyncResult? = null,
     val deviceCalendars: List<DeviceCalendarInfo> = emptyList(),
@@ -74,6 +75,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     private val _isSearching = MutableStateFlow(false)
     private val _selectedCalendarFilter = MutableStateFlow<Set<Long>>(emptySet())
     private val _selectedCategoryFilter = MutableStateFlow<String?>(null)
+    private val _hasCalendarPermission = MutableStateFlow(false)
     private val _isSyncing = MutableStateFlow(false)
     private val _syncResult = MutableStateFlow<SyncResult?>(null)
     private val _deviceCalendars = MutableStateFlow<List<DeviceCalendarInfo>>(emptyList())
@@ -95,6 +97,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         _isSearching,
         _selectedCalendarFilter,
         _selectedCategoryFilter,
+        _hasCalendarPermission,
         _isSyncing,
         _syncResult,
         _deviceCalendars,
@@ -115,17 +118,18 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         val isSearching = params[5] as Boolean
         val selectedCalFilter = params[6] as Set<Long>
         val selectedCatFilter = params[7] as String?
-        val isSyncing = params[8] as Boolean
-        val syncResult = params[9] as SyncResult?
-        val deviceCalendars = params[10] as List<DeviceCalendarInfo>
-        val editingEvent = params[11] as EventEntity?
-        val isEventDialogOpen = params[12] as Boolean
-        val isFilterSheetOpen = params[13] as Boolean
-        val isDatePickerOpen = params[14] as Boolean
-        val isBackupDialogOpen = params[15] as Boolean
-        val snackbarMessage = params[16] as String?
-        val detailEvent = params[17] as EventEntity?
-        val isDetailOpen = params[18] as Boolean
+        val hasCalendarPermission = params[8] as Boolean
+        val isSyncing = params[9] as Boolean
+        val syncResult = params[10] as SyncResult?
+        val deviceCalendars = params[11] as List<DeviceCalendarInfo>
+        val editingEvent = params[12] as EventEntity?
+        val isEventDialogOpen = params[13] as Boolean
+        val isFilterSheetOpen = params[14] as Boolean
+        val isDatePickerOpen = params[15] as Boolean
+        val isBackupDialogOpen = params[16] as Boolean
+        val snackbarMessage = params[17] as String?
+        val detailEvent = params[18] as EventEntity?
+        val isDetailOpen = params[19] as Boolean
 
         // Active visible calendars
         val activeCalIds = if (selectedCalFilter.isEmpty()) {
@@ -165,6 +169,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             isSearching = isSearching,
             selectedCalendarFilter = selectedCalFilter,
             selectedCategoryFilter = selectedCatFilter,
+            hasCalendarPermission = hasCalendarPermission,
             isSyncing = isSyncing,
             syncResult = syncResult,
             deviceCalendars = deviceCalendars,
@@ -327,7 +332,9 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     // Google Calendar Sync
     fun checkAndLoadDeviceCalendars() {
         viewModelScope.launch {
-            if (repository.hasCalendarPermission()) {
+            val granted = repository.hasCalendarPermission()
+            _hasCalendarPermission.value = granted
+            if (granted) {
                 val list = repository.getDeviceCalendars()
                 _deviceCalendars.value = list
             }

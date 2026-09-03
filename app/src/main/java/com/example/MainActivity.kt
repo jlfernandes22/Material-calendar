@@ -39,6 +39,11 @@ class MainActivity : ComponentActivity() {
     }
     handleWidgetIntent()
     lifecycleScope.launch { WidgetUpdater.update(this@MainActivity) }
+    // Self-healing reminders: after a device reboot, backup restore, or WorkManager
+    // data loss, re-arm every upcoming event reminder from the local database.
+    lifecycleScope.launch {
+      ReminderScheduler.rescheduleAll(applicationContext)
+    }
   }
 
   private fun requestNotificationPermissionIfNeeded() {

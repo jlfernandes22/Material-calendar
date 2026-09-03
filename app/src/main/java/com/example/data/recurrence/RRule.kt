@@ -4,16 +4,29 @@ import java.util.Calendar
 
 /**
  * Minimal RFC 5545 RRULE reader/expander supporting FREQ (DAILY/WEEKLY/MONTHLY/YEARLY),
- * INTERVAL, BYDAY (for weekly), UNTIL and COUNT. Occurrences are computed in the device's
- * local time zone, matching the way events are stored (as epoch millis) and displayed.
+ * INTERVAL, BYDAY (for weekly), UNTIL and COUNT.
+ *
+ * Occurrences are computed in the device's local time zone (matching the way events are
+ * stored as epoch millis and displayed). Recurring occurrences keep their local wall-clock
+ * time across DST transitions because expansion walks [Calendar] fields instead of doing
+ * fixed 24h millis arithmetic.
+ *
+ * Occurrence indices ("k") always count occurrences since DTSTART, so COUNT behaves the
+ * same whether or not the queried range starts near DTSTART. When the query range begins
+ * long after DTSTART, the index is jumped forward analytically; for WEEKLY+BYDAY the
+ * count of skipped occurrences is then an approximation (documented below).
  */
 object RRule {
+
+    private const val DAY_MS = 86_400_000L
+    private const val WEEK_MS = 7L * DAY_MS
+    private const val MAX_OCCURRENCES = 100_000L
 
     data class Parsed(
         val freq: String,             // DAILY | WEEKLY | MONTHLY | YEARLY
         val interval: Int,            // default 1
         val byDay: List<Int>,         // Java Calendar.DAY_OF_WEEK constants (1=Sunday .. 7=Saturday)
-        val until: Long?,             // exclusive upper bound (millis)
+        val until: Long?,             // inclusive upper bound (millis)
         val count: Int                // -1 = unbounded
     )
 
@@ -75,8 +88,8 @@ object RRule {
     }
 
     /**
-     * Returns occurrence start times in [rangeStart, rangeEnd]. Base start is included only
-     * if it actually falls inside the range; later occurrences are expanded from [startMillis].
+     * Returns occurrence start times in [rangeStart, rangeEnd], in chronological order.
+     * UNTIL is treated as inclusive per RFC 5545.
      */
     fun occurrences(
         startMillis: Long,
@@ -86,29 +99,114 @@ object RRule {
         rangeEnd: Long
     ): List<Long> {
         val parsed = parse(rrule) ?: return emptyList()
-        val upper = minOf(recurrenceUntilMillis?.let { it } ?: Long.MAX_VALUE, rangeEnd)
+        val upper = minOf(recurrenceUntilMillis ?: Long.MAX_VALUE, rangeEnd)
         if (upper < rangeStart) return emptyList()
 
         val result = mutableListOf<Long>()
-        val count = parsed.count
-        var seen = 0
+        val countLimit = parsed.count
 
-        var k = 0L
-        step@ while (k < 100_000) {
-            val candidate = candidateAt(parsed, startMillis, k)
-            if (candidate > upper) break
-            if (candidate >= rangeStart) {
-                if (parsed.until != null && candidate > parsed.until!!) break
-                if (count >= 0 && seen >= count) break
-                result.add(candidate)
-                seen++
-                if (count >= 0 && seen >= count) break
-            }
-            k++
-
-            // Guard against pathological schedules (e.g. yearly interval on Feb 29).
-            if (candidate - startMillis > 500L * 365L * 24L * 3600_000L) break
+        fun accept(candidate: Long, index: Long): Boolean {
+            // Returns false when expansion must stop entirely.
+            if (countLimit >= 0 && index >= countLimit) return false
+            if (candidate > upper) return false
+            if (parsed.until != null && candidate > parsed.until) return false
+            if (candidate >= rangeStart) result.add(candidate)
+            return true
         }
+
+        when (parsed.freq) {
+            "DAILY" -> {
+                val approxDays = Math.floorDiv(rangeStart - startMillis, DAY_MS)
+                var k = maxOf(0L, Math.floorDiv(approxDays - parsed.interval, parsed.interval.toLong()))
+                val cal = Calendar.getInstance().apply {
+                    timeInMillis = startMillis
+                    add(Calendar.DAY_OF_MONTH, (k * parsed.interval).toInt())
+                }
+                while (k < MAX_OCCURRENCES) {
+                    if (!accept(cal.timeInMillis, k)) break
+                    cal.add(Calendar.DAY_OF_MONTH, parsed.interval)
+                    k++
+                }
+            }
+
+            "WEEKLY" -> {
+                if (parsed.byDay.isEmpty()) {
+                    // Simple every-N-weeks on DTSTART's weekday.
+                    val approxDays = Math.floorDiv(rangeStart - startMillis, DAY_MS)
+                    val approxWeeks = Math.floorDiv(approxDays, 7L)
+                    var k = maxOf(0L, Math.floorDiv(approxWeeks - parsed.interval, parsed.interval.toLong()))
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = startMillis
+                        add(Calendar.DAY_OF_MONTH, (k * parsed.interval * 7L).toInt())
+                    }
+                    while (k < MAX_OCCURRENCES) {
+                        if (!accept(cal.timeInMillis, k)) break
+                        cal.add(Calendar.DAY_OF_MONTH, parsed.interval * 7)
+                        k++
+                    }
+                } else {
+                    // Walk day by day so EVERY BYDAY weekday inside each interval week is
+                    // produced (e.g. FREQ=WEEKLY;BYDAY=MO,WE yields both Monday and Wednesday).
+                    // Occurrences before the jumped-to day are approximated for COUNT.
+                    val approxDays = Math.floorDiv(rangeStart - startMillis, DAY_MS)
+                    val startDay = maxOf(0L, approxDays - 14L)
+                    var index = Math.round(startDay / 7.0) * parsed.byDay.size
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = startMillis
+                        add(Calendar.DAY_OF_MONTH, startDay.toInt())
+                    }
+                    var d = startDay
+                    while (d < MAX_OCCURRENCES) {
+                        val t = cal.timeInMillis
+                        if (t > upper) break
+                        val weekday = cal.get(Calendar.DAY_OF_WEEK)
+                        if (parsed.byDay.contains(weekday) &&
+                            Math.floorMod(weeksFromAnchorMonday(t, startMillis), parsed.interval.toLong()) == 0L
+                        ) {
+                            if (countLimit >= 0 && index >= countLimit) break
+                            if (parsed.until != null && t > parsed.until) break
+                            if (t >= rangeStart) result.add(t)
+                            index++
+                        }
+                        cal.add(Calendar.DAY_OF_MONTH, 1)
+                        d++
+                    }
+                }
+            }
+
+            "MONTHLY" -> {
+                val approxMonths = ((rangeStart - startMillis) / (30.44 * DAY_MS)).toLong()
+                var k = maxOf(0L, Math.floorDiv(approxMonths - 2, parsed.interval.toLong()))
+                val dayOfMonth = Calendar.getInstance().apply { timeInMillis = startMillis }
+                    .get(Calendar.DAY_OF_MONTH)
+                // Always expand from the DTSTART anchor: deriving from an already-clamped
+                // date would drift (Jan 31 -> Feb 28 -> Mar 28 instead of Mar 31).
+                val cal = Calendar.getInstance().apply { timeInMillis = startMillis }
+                while (k < MAX_OCCURRENCES) {
+                    cal.timeInMillis = startMillis
+                    cal.add(Calendar.MONTH, (k * parsed.interval).toInt())
+                    cal.clampDayOfMonth(dayOfMonth)
+                    if (!accept(cal.timeInMillis, k)) break
+                    k++
+                }
+            }
+
+            "YEARLY" -> {
+                val approxYears = ((rangeStart - startMillis) / (365.25 * DAY_MS)).toLong()
+                var k = maxOf(0L, Math.floorDiv(approxYears - 1, parsed.interval.toLong()))
+                // Anchor-based expansion keeps Feb 29 occurrences aligned in leap years.
+                val cal = Calendar.getInstance().apply { timeInMillis = startMillis }
+                while (k < MAX_OCCURRENCES) {
+                    cal.timeInMillis = startMillis
+                    cal.add(Calendar.YEAR, (k * parsed.interval).toInt())
+                    if (!accept(cal.timeInMillis, k)) break
+                    k++
+                }
+            }
+
+            else -> return emptyList()
+        }
+
         return result
     }
 
@@ -118,53 +216,41 @@ object RRule {
         recurrenceUntilMillis: Long?,
         afterMillis: Long
     ): Long? {
-        val parsed = parse(rrule) ?: return null
-        val upper = recurrenceUntilMillis ?: (afterMillis + 500L * 365L * 24L * 3600_000L)
-        for (k in 0L until 100_000L) {
-            val candidate = candidateAt(parsed, startMillis, k)
-            if (candidate > upper) return null
-            if (candidate > afterMillis) return candidate
-            if (candidate - startMillis > 500L * 365L * 24L * 3600_000L) return null
-        }
-        return null
+        // Strictly after [afterMillis]; scan up to ~500 years ahead.
+        val horizon = afterMillis + 500L * 365L * DAY_MS
+        return occurrences(
+            startMillis = startMillis,
+            rrule = rrule,
+            recurrenceUntilMillis = recurrenceUntilMillis,
+            rangeStart = afterMillis + 1,
+            rangeEnd = horizon
+        ).firstOrNull()
     }
 
-    private fun candidateAt(parsed: Parsed, startMillis: Long, k: Long): Long {
-        val startCal = Calendar.getInstance().apply { timeInMillis = startMillis }
-        val interval = parsed.interval
-        return when (parsed.freq) {
-            "DAILY" -> startMillis + (k * interval) * 86_400_000L
-            "WEEKLY" -> weeklyCandidate(parsed, startCal, k * interval)
-            "MONTHLY" -> {
-                val cal = startCal.clone() as Calendar
-                val shift = (k * interval).toInt()
-                val currentDay = cal.get(Calendar.DAY_OF_MONTH)
-                cal.add(Calendar.MONTH, shift)
-                val maxDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-                if (currentDay > maxDay) cal.set(Calendar.DAY_OF_MONTH, maxDay) else cal.set(Calendar.DAY_OF_MONTH, currentDay)
-                cal.timeInMillis
-            }
-            "YEARLY" -> {
-                val cal = startCal.clone() as Calendar
-                cal.add(Calendar.YEAR, (k * interval).toInt())
-                cal.timeInMillis
-            }
-            else -> startMillis + (k * interval) * 86_400_000L
-        }
+    /** Keeps the same day-of-month, clamping to the last day of the (new) month. */
+    private fun Calendar.clampDayOfMonth(dayOfMonth: Int) {
+        val maxDay = getActualMaximum(Calendar.DAY_OF_MONTH)
+        set(Calendar.DAY_OF_MONTH, if (dayOfMonth > maxDay) maxDay else dayOfMonth)
     }
 
-    private fun weeklyCandidate(parsed: Parsed, startCal: Calendar, intervalWeeks: Long): Long {
-        // Base day is always DTSTART's weekday.
-        val base = (startCal.clone() as Calendar)
-        base.add(Calendar.DAY_OF_MONTH, (intervalWeeks * 7).toInt())
-
-        if (parsed.byDay.isEmpty()) return base.timeInMillis
-
-        val startWd = startCal.get(Calendar.DAY_OF_WEEK)
-        // Accumulate by the FIRST matching weekday so occurrences stay ordered & deduped.
-        val chosen = parsed.byDay.minBy { ((it - startWd) + 7) % 7 }
-        val diff = ((chosen - startWd) + 7) % 7
-        base.add(Calendar.DAY_OF_MONTH, diff)
-        return base.timeInMillis
+    /**
+     * Number of whole weeks between the Monday-based week of [millis] and the Monday-based
+     * week of the DTSTART anchor [anchorMillis]. Used for WEEKLY interval alignment
+     * (RFC default WKST=MO).
+     */
+    private fun weeksFromAnchorMonday(millis: Long, anchorMillis: Long): Long {
+        fun startOfWeekMonday(time: Long): Long {
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = time
+                firstDayOfWeek = Calendar.MONDAY
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+                set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            }
+            return cal.timeInMillis
+        }
+        return Math.round((startOfWeekMonday(millis) - startOfWeekMonday(anchorMillis)).toDouble() / WEEK_MS)
     }
 }

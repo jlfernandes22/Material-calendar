@@ -72,32 +72,66 @@ class NextEventsWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = NextEventsWidget()
 }
 
-private suspend fun loadUpcomingEvents(context: Context): List<EventEntity> = withContext(Dispatchers.IO) {
+/** An event plus the concrete occurrence time it should be displayed at. */
+private data class UpcomingEvent(val event: EventEntity, val occurrenceStart: Long)
+
+private const val HORIZON_DAYS = 45L
+private const val DAY_MS = 24L * 3600_000L
+
+private suspend fun loadUpcomingEvents(context: Context): List<UpcomingEvent> = withContext(Dispatchers.IO) {
     val db = AppDatabase.getDatabase(context.applicationContext, null)
     val all = runCatching { db.eventDao().getAllEvents().first() }.getOrDefault(emptyList())
     val now = System.currentTimeMillis()
-    val near = now + 45L * 24 * 3600_000L
-    all.filter {
-        (it.endMillis >= now && it.startMillis <= near) || DateTimeUtils.nextOccurrenceAfter(it, now) != null
+    val near = now + HORIZON_DAYS * DAY_MS
+
+    val upcoming = mutableListOf<UpcomingEvent>()
+    for (event in all) {
+        val rule = DateTimeUtils.effectiveRrule(event)
+        if (rule != null) {
+            // Recurring events: show their next concrete occurrences, not the stale
+            // DTSTART from months ago. Duration is preserved per occurrence.
+            val occurrences = runCatching {
+                DateTimeUtils.occurrencesBetween(event, now - DAY_MS, near)
+            }.getOrDefault(emptyList())
+            val shown = occurrences
+                .filter { occ -> occ + (event.endMillis - event.startMillis) >= now }
+                .take(3)
+            if (shown.isNotEmpty()) {
+                shown.forEach { occ -> upcoming.add(UpcomingEvent(event, occ)) }
+            } else if (event.endMillis >= now && event.startMillis <= near) {
+                upcoming.add(UpcomingEvent(event, event.startMillis))
+            }
+        } else if (event.endMillis >= now && event.startMillis <= near) {
+            upcoming.add(UpcomingEvent(event, event.startMillis))
+        }
+        if (upcoming.size > 60) break
     }
-        .sortedBy { it.startMillis }
-        .take(20)
+
+    upcoming.sortedBy { it.occurrenceStart }.take(20)
 }
 
 private val EventIdKey = ActionParameters.Key<Long>("event_id")
+private val CreateEventKey = ActionParameters.Key<Boolean>("create_event")
 
 private fun openApp(context: Context) =
     actionStartActivity(ComponentName(context, MainActivity::class.java))
 
 @OptIn(ExperimentalGlanceApi::class)
-private fun openEvent(context: Context, event: EventEntity): Action =
+private fun openEvent(context: Context, upcoming: UpcomingEvent): Action =
     actionStartActivity(
         ComponentName(context, MainActivity::class.java),
-        actionParametersOf(EventIdKey to event.id)
+        actionParametersOf(EventIdKey to upcoming.event.id)
+    )
+
+@OptIn(ExperimentalGlanceApi::class)
+private fun openCreateEvent(context: Context): Action =
+    actionStartActivity(
+        ComponentName(context, MainActivity::class.java),
+        actionParametersOf(CreateEventKey to true)
     )
 
 @Composable
-private fun FutureEventsContent(context: Context, events: List<EventEntity>) {
+private fun FutureEventsContent(context: Context, events: List<UpcomingEvent>) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -124,8 +158,8 @@ private fun FutureEventsContent(context: Context, events: List<EventEntity>) {
             }
         } else {
             LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                items(events) { event ->
-                    EventRow(context, event)
+                items(events) { upcoming ->
+                    EventRow(context, upcoming)
                 }
             }
         }
@@ -159,7 +193,7 @@ private fun Header(context: Context) {
             modifier = GlanceModifier
                 .background(GlanceTheme.colors.primary)
                 .cornerRadius(14.dp)
-                .clickable(openApp(context))
+                .clickable(openCreateEvent(context))
                 .padding(horizontal = 12.dp, vertical = 5.dp)
         ) {
             Text(
@@ -175,13 +209,14 @@ private fun Header(context: Context) {
 }
 
 @Composable
-private fun EventRow(context: Context, event: EventEntity) {
+private fun EventRow(context: Context, upcoming: UpcomingEvent) {
+    val event = upcoming.event
     val eventColor = if (event.color != 0) ColorProvider(ComposeColor(event.color)) else GlanceTheme.colors.primary
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
             .padding(top = 4.dp, bottom = 4.dp)
-            .clickable(openEvent(context, event))
+            .clickable(openEvent(context, upcoming))
             .background(GlanceTheme.colors.surfaceVariant)
             .cornerRadius(14.dp)
             .padding(10.dp),
@@ -209,7 +244,7 @@ private fun EventRow(context: Context, event: EventEntity) {
                 Spacer(GlanceModifier.height(2.dp))
             }
             Text(
-                text = timeText(event),
+                text = timeText(upcoming),
                 style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp),
                 maxLines = 1
             )
@@ -217,9 +252,14 @@ private fun EventRow(context: Context, event: EventEntity) {
     }
 }
 
-private fun timeText(event: EventEntity): String {
-    val day = SimpleDateFormat("EEE", Locale.getDefault()).format(Date(event.startMillis))
-    val time = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(event.startMillis))
-    val suffix = if (event.isAllDay) "· All day" else ""
-    return "$day · $time$suffix"
+private fun timeText(upcoming: UpcomingEvent): String {
+    val event = upcoming.event
+    val day = SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(upcoming.occurrenceStart))
+    return if (event.isAllDay) {
+        "$day · All day"
+    } else {
+        val time = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(upcoming.occurrenceStart))
+        val repeatSuffix = if (DateTimeUtils.effectiveRrule(event) != null) " · ↻" else ""
+        "$day · $time$repeatSuffix"
+    }
 }

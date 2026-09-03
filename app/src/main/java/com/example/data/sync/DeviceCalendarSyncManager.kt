@@ -120,6 +120,7 @@ class DeviceCalendarSyncManager(
 
         var importedCalendarsCount = 0
         var importedEventsCount = 0
+        var updatedEventsCount = 0
 
         val calendarMapping = mutableMapOf<Long, Long>() // System Cal ID -> Local DB Cal ID
 
@@ -159,7 +160,8 @@ class DeviceCalendarSyncManager(
             CalendarContract.Events.DTEND,
             CalendarContract.Events.ALL_DAY,
             CalendarContract.Events.RRULE,
-            CalendarContract.Events.EVENT_COLOR
+            CalendarContract.Events.EVENT_COLOR,
+            CalendarContract.Events.EVENT_TIMEZONE
         )
 
         try {
@@ -183,8 +185,10 @@ class DeviceCalendarSyncManager(
                 val allDayIdx = it.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)
                 val rruleIdx = it.getColumnIndexOrThrow(CalendarContract.Events.RRULE)
                 val colorIdx = it.getColumnIndexOrThrow(CalendarContract.Events.EVENT_COLOR)
+                val tzIdx = it.getColumnIndexOrThrow(CalendarContract.Events.EVENT_TIMEZONE)
 
                 val batchEvents = mutableListOf<EventEntity>()
+                var refreshedEventsCount = 0
 
                 while (it.moveToNext()) {
                     val sysEventId = it.getLong(idIdx)
@@ -200,15 +204,16 @@ class DeviceCalendarSyncManager(
                         end = start + 3600_000L // default 1 hr
                     }
                     val isAllDay = it.getInt(allDayIdx) == 1
-                    val rrule = it.getString(rruleIdx) ?: "NONE"
+                    val rrule = it.getString(rruleIdx)
                     val recurrence = when {
-                        rrule.contains("DAILY") -> "DAILY"
-                        rrule.contains("WEEKLY") -> "WEEKLY"
-                        rrule.contains("MONTHLY") -> "MONTHLY"
-                        rrule.contains("YEARLY") -> "YEARLY"
+                        rrule?.contains("DAILY") == true -> "DAILY"
+                        rrule?.contains("WEEKLY") == true -> "WEEKLY"
+                        rrule?.contains("MONTHLY") == true -> "MONTHLY"
+                        rrule?.contains("YEARLY") == true -> "YEARLY"
                         else -> "NONE"
                     }
                     val color = try { it.getInt(colorIdx) } catch (e: Exception) { 0 }
+                    val timezone = it.getString(tzIdx)?.takeIf { tz -> tz.isNotBlank() }
 
                     val existingEvent = eventDao.getEventBySystemId(sysEventId)
                     if (existingEvent == null) {
@@ -224,9 +229,34 @@ class DeviceCalendarSyncManager(
                                 color = color,
                                 category = inferCategory(title, desc),
                                 recurrence = recurrence,
+                                rrule = rrule,
+                                timezone = timezone,
                                 systemEventId = sysEventId
                             )
                         )
+                    } else {
+                        // Re-import: refresh fields that mirror the provider so edits made
+                        // in Google Calendar propagate into the local copy. Local-only
+                        // fields (category, reminder, completion, color overrides by the
+                        // user when the provider color is 0) are preserved.
+                        val refreshed = existingEvent.copy(
+                            calendarId = localCalId,
+                            title = title,
+                            description = desc,
+                            location = loc,
+                            startMillis = start,
+                            endMillis = end,
+                            isAllDay = isAllDay,
+                            color = if (color != 0) color else existingEvent.color,
+                            recurrence = recurrence,
+                            rrule = rrule,
+                            timezone = timezone,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        if (refreshed != existingEvent) {
+                            eventDao.updateEvent(refreshed)
+                            refreshedEventsCount++
+                        }
                     }
                 }
 
@@ -234,6 +264,7 @@ class DeviceCalendarSyncManager(
                     eventDao.insertEvents(batchEvents)
                     importedEventsCount = batchEvents.size
                 }
+                updatedEventsCount = refreshedEventsCount
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -245,11 +276,17 @@ class DeviceCalendarSyncManager(
             )
         }
 
+        val summary = buildString {
+            append("Imported $importedEventsCount new events")
+            if (updatedEventsCount > 0) append(" and refreshed $updatedEventsCount existing")
+            append(" from device Google Calendar.")
+        }
+
         return@withContext SyncResult(
             success = true,
             calendarsImported = importedCalendarsCount,
             eventsImported = importedEventsCount,
-            message = "Imported $importedCalendarsCount calendars and $importedEventsCount events from device Google Calendar."
+            message = summary
         )
     }
 

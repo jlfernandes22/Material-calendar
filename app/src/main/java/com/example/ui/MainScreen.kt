@@ -214,7 +214,7 @@ fun MainScreen(
                     }
                     CalendarViewMode.SYNC_BACKUP -> {
                         SyncAndBackupView(
-                            hasPermission = viewModel.repository.hasCalendarPermission(),
+                            hasPermission = uiState.hasCalendarPermission,
                             isSyncing = uiState.isSyncing,
                             syncResult = uiState.syncResult,
                             deviceCalendars = uiState.deviceCalendars,

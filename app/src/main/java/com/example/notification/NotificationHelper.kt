@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
+import com.example.R
 import com.example.data.model.EventEntity
 
 object NotificationHelper {
@@ -45,7 +46,7 @@ object NotificationHelper {
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(event.title)
             .setContentText(event.description.ifBlank { "Event reminder" })
             .setAutoCancel(true)
