@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import android.util.Log
 import com.example.notification.NotificationHelper
+import com.example.notification.ReminderScheduler
 import com.example.ui.MainScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.CalendarViewModel
