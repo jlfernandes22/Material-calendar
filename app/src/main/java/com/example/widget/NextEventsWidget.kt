@@ -1,19 +1,13 @@
 package com.example.widget
 
-import android.content.ComponentName
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.glance.ExperimentalGlanceApi
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
-import androidx.glance.action.Action
-import androidx.glance.action.ActionParameters
-import androidx.glance.action.actionParametersOf
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -36,34 +30,34 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.glance.unit.ColorProvider
-import com.example.MainActivity
-import com.example.data.database.AppDatabase
 import com.example.data.model.EventEntity
 import com.example.ui.util.DateTimeUtils
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
+/**
+ * "Up next" schedule widget listing the upcoming local events.
+ *
+ * Improvements over the previous revision:
+ * - The "New" chip now opens the event editor directly (create_event deep link).
+ * - Friendly day labels: Today / Tomorrow / weekday+date instead of raw dates.
+ * - All-day events render as "All day" instead of a misleading "12:00 AM" start.
+ * - Event location is surfaced on the secondary line when present.
+ * - Rows deep-link to the event details sheet.
+ */
 class NextEventsWidget : GlanceAppWidget() {
     override val sizeMode: SizeMode = SizeMode.Responsive(
         setOf(
-            DpSize(180.dp, 80.dp),
-            DpSize(250.dp, 120.dp),
-            DpSize(300.dp, 160.dp),
-            DpSize(400.dp, 260.dp)
+            DpSize(180.dp, 100.dp),
+            DpSize(250.dp, 140.dp),
+            DpSize(320.dp, 200.dp)
         )
     )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val events = loadUpcomingEvents(context)
-        val colors = widgetColors(context)
         provideContent {
-            GlanceTheme(colors = colors) { FutureEventsContent(context, events) }
+            GlanceTheme(colors = widgetColors(context)) {
+                FutureEventsContent(context, events)
+            }
         }
     }
 }
@@ -72,29 +66,17 @@ class NextEventsWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = NextEventsWidget()
 }
 
-private suspend fun loadUpcomingEvents(context: Context): List<EventEntity> = withContext(Dispatchers.IO) {
-    val db = AppDatabase.getDatabase(context.applicationContext, null)
-    val all = runCatching { db.eventDao().getAllEvents().first() }.getOrDefault(emptyList())
+private suspend fun loadUpcomingEvents(context: Context): List<EventEntity> {
     val now = System.currentTimeMillis()
-    val near = now + 45L * 24 * 3600_000L
-    all.filter {
-        (it.endMillis >= now && it.startMillis <= near) || DateTimeUtils.nextOccurrenceAfter(it, now) != null
-    }
+    val horizon = now + 45L * 24 * 3600_000L
+    return WidgetData.loadAllEvents(context)
+        .filter {
+            (it.endMillis >= now && it.startMillis <= horizon) ||
+                DateTimeUtils.nextOccurrenceAfter(it, now) != null
+        }
         .sortedBy { it.startMillis }
         .take(20)
 }
-
-private val EventIdKey = ActionParameters.Key<Long>("event_id")
-
-private fun openApp(context: Context) =
-    actionStartActivity(ComponentName(context, MainActivity::class.java))
-
-@OptIn(ExperimentalGlanceApi::class)
-private fun openEvent(context: Context, event: EventEntity): Action =
-    actionStartActivity(
-        ComponentName(context, MainActivity::class.java),
-        actionParametersOf(EventIdKey to event.id)
-    )
 
 @Composable
 private fun FutureEventsContent(context: Context, events: List<EventEntity>) {
@@ -106,25 +88,35 @@ private fun FutureEventsContent(context: Context, events: List<EventEntity>) {
             .padding(14.dp)
     ) {
         Header(context)
-        Spacer(GlanceModifier.height(6.dp))
+        Spacer(GlanceModifier.height(8.dp))
 
         if (events.isEmpty()) {
             Box(
                 modifier = GlanceModifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "No upcoming events",
-                    style = TextStyle(
-                        color = GlanceTheme.colors.onSurfaceVariant,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "No upcoming events",
+                        style = TextStyle(
+                            color = GlanceTheme.colors.onSurface,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     )
-                )
+                    Spacer(GlanceModifier.height(2.dp))
+                    Text(
+                        text = "Tap + to plan something",
+                        style = TextStyle(
+                            color = GlanceTheme.colors.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
             }
         } else {
             LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                items(events) { event ->
+                items(events, itemId = { it.id }) { event ->
                     EventRow(context, event)
                 }
             }
@@ -159,11 +151,11 @@ private fun Header(context: Context) {
             modifier = GlanceModifier
                 .background(GlanceTheme.colors.primary)
                 .cornerRadius(14.dp)
-                .clickable(openApp(context))
+                .clickable(WidgetActions.createEvent(context))
                 .padding(horizontal = 12.dp, vertical = 5.dp)
         ) {
             Text(
-                text = "New",
+                text = "+ New",
                 style = TextStyle(
                     color = GlanceTheme.colors.onPrimary,
                     fontSize = 12.sp,
@@ -176,12 +168,11 @@ private fun Header(context: Context) {
 
 @Composable
 private fun EventRow(context: Context, event: EventEntity) {
-    val eventColor = if (event.color != 0) ColorProvider(ComposeColor(event.color)) else GlanceTheme.colors.primary
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 4.dp)
-            .clickable(openEvent(context, event))
+            .padding(vertical = 4.dp)
+            .clickable(WidgetActions.openEvent(context, event.id))
             .background(GlanceTheme.colors.surfaceVariant)
             .cornerRadius(14.dp)
             .padding(10.dp),
@@ -189,10 +180,10 @@ private fun EventRow(context: Context, event: EventEntity) {
     ) {
         Box(
             modifier = GlanceModifier
-                .background(eventColor)
+                .background(eventColorProvider(event))
                 .cornerRadius(3.dp)
                 .width(4.dp)
-                .height(34.dp)
+                .height(38.dp)
         ) { }
         Spacer(GlanceModifier.width(10.dp))
         Column(modifier = GlanceModifier.defaultWeight()) {
@@ -203,23 +194,32 @@ private fun EventRow(context: Context, event: EventEntity) {
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 ),
-                maxLines = 2
+                maxLines = 1
             )
-            if (event.location.isNotBlank()) {
-                Spacer(GlanceModifier.height(2.dp))
-            }
+            Spacer(GlanceModifier.height(2.dp))
             Text(
-                text = timeText(event),
+                text = scheduleLine(event),
                 style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp),
                 maxLines = 1
             )
+            if (event.location.isNotBlank()) {
+                Spacer(GlanceModifier.height(1.dp))
+                Text(
+                    text = event.location,
+                    style = TextStyle(
+                        color = GlanceTheme.colors.onSurfaceVariant,
+                        fontSize = 10.sp
+                    ),
+                    maxLines = 1
+                )
+            }
         }
     }
 }
 
-private fun timeText(event: EventEntity): String {
-    val day = SimpleDateFormat("EEE", Locale.getDefault()).format(Date(event.startMillis))
-    val time = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(event.startMillis))
-    val suffix = if (event.isAllDay) "· All day" else ""
-    return "$day · $time$suffix"
-}
+/**
+ * "Today · 2:30 PM", "Tomorrow · All day", "Mon, Sep 8 · 9:00 AM".
+ * All-day events no longer show a misleading midnight start time.
+ */
+private fun scheduleLine(event: EventEntity): String =
+    "${WidgetFormat.friendlyDay(event.startMillis)} · ${WidgetFormat.timeLabel(event)}"

@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.localcalendar"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -70,4 +70,6 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit)
 }
