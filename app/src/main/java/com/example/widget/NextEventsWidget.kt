@@ -1,19 +1,13 @@
 package com.example.widget
 
-import android.content.ComponentName
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.glance.ExperimentalGlanceApi
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
-import androidx.glance.action.Action
-import androidx.glance.action.ActionParameters
-import androidx.glance.action.actionParametersOf
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -36,19 +30,24 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.glance.unit.ColorProvider
-import com.example.MainActivity
-import com.example.data.database.AppDatabase
 import com.example.data.model.EventEntity
 import com.example.ui.util.DateTimeUtils
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * "Up next" schedule widget listing the upcoming local events.
+ *
+ * Merge of the two branches, keeping the best of each:
+ * - Recurring events are expanded to their next concrete occurrences (not the
+ *   stale DTSTART from months ago); duration is preserved per occurrence.
+ * - Rows deep-link to the event details sheet, "+ New" opens the editor
+ *   directly via the shared [WidgetActions] contract.
+ * - Friendly day labels: Today / Tomorrow / weekday+date.
+ * - All-day events render as "All day" instead of a misleading "12:00 AM".
+ * - Event location is surfaced on the secondary line when present.
+ */
 class NextEventsWidget : GlanceAppWidget() {
     override val sizeMode: SizeMode = SizeMode.Responsive(
         setOf(
@@ -78,9 +77,8 @@ private data class UpcomingEvent(val event: EventEntity, val occurrenceStart: Lo
 private const val HORIZON_DAYS = 45L
 private const val DAY_MS = 24L * 3600_000L
 
-private suspend fun loadUpcomingEvents(context: Context): List<UpcomingEvent> = withContext(Dispatchers.IO) {
-    val db = AppDatabase.getDatabase(context.applicationContext, null)
-    val all = runCatching { db.eventDao().getAllEvents().first() }.getOrDefault(emptyList())
+private suspend fun loadUpcomingEvents(context: Context): List<UpcomingEvent> {
+    val all = WidgetData.loadAllEvents(context)
     val now = System.currentTimeMillis()
     val near = now + HORIZON_DAYS * DAY_MS
 
@@ -88,8 +86,7 @@ private suspend fun loadUpcomingEvents(context: Context): List<UpcomingEvent> = 
     for (event in all) {
         val rule = DateTimeUtils.effectiveRrule(event)
         if (rule != null) {
-            // Recurring events: show their next concrete occurrences, not the stale
-            // DTSTART from months ago. Duration is preserved per occurrence.
+            // Recurring events: show their next concrete occurrences.
             val occurrences = runCatching {
                 DateTimeUtils.occurrencesBetween(event, now - DAY_MS, near)
             }.getOrDefault(emptyList())
@@ -108,27 +105,8 @@ private suspend fun loadUpcomingEvents(context: Context): List<UpcomingEvent> = 
     }
 
     upcoming.sortedBy { it.occurrenceStart }.take(20)
+    return upcoming
 }
-
-private val EventIdKey = ActionParameters.Key<Long>("event_id")
-private val CreateEventKey = ActionParameters.Key<Boolean>("create_event")
-
-private fun openApp(context: Context) =
-    actionStartActivity(ComponentName(context, MainActivity::class.java))
-
-@OptIn(ExperimentalGlanceApi::class)
-private fun openEvent(context: Context, upcoming: UpcomingEvent): Action =
-    actionStartActivity(
-        ComponentName(context, MainActivity::class.java),
-        actionParametersOf(EventIdKey to upcoming.event.id)
-    )
-
-@OptIn(ExperimentalGlanceApi::class)
-private fun openCreateEvent(context: Context): Action =
-    actionStartActivity(
-        ComponentName(context, MainActivity::class.java),
-        actionParametersOf(CreateEventKey to true)
-    )
 
 @Composable
 private fun FutureEventsContent(context: Context, events: List<UpcomingEvent>) {
@@ -147,16 +125,28 @@ private fun FutureEventsContent(context: Context, events: List<UpcomingEvent>) {
                 modifier = GlanceModifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "No upcoming events",
-                    style = TextStyle(
-                        color = GlanceTheme.colors.onSurfaceVariant,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "No upcoming events",
+                        style = TextStyle(
+                            color = GlanceTheme.colors.onSurface,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     )
-                )
+                    Spacer(GlanceModifier.height(2.dp))
+                    Text(
+                        text = "Tap + to plan something",
+                        style = TextStyle(
+                            color = GlanceTheme.colors.onSurfaceVariant,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
             }
         } else {
+            // Plain items(): several occurrences of one recurring event can be
+            // listed, so a stable itemId per event would collide.
             LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
                 items(events) { upcoming ->
                     EventRow(context, upcoming)
@@ -193,11 +183,11 @@ private fun Header(context: Context) {
             modifier = GlanceModifier
                 .background(GlanceTheme.colors.primary)
                 .cornerRadius(14.dp)
-                .clickable(openCreateEvent(context))
+                .clickable(WidgetActions.createEvent(context))
                 .padding(horizontal = 12.dp, vertical = 5.dp)
         ) {
             Text(
-                text = "New",
+                text = "+ New",
                 style = TextStyle(
                     color = GlanceTheme.colors.onPrimary,
                     fontSize = 12.sp,
@@ -211,12 +201,11 @@ private fun Header(context: Context) {
 @Composable
 private fun EventRow(context: Context, upcoming: UpcomingEvent) {
     val event = upcoming.event
-    val eventColor = if (event.color != 0) ColorProvider(ComposeColor(event.color)) else GlanceTheme.colors.primary
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
             .padding(top = 4.dp, bottom = 4.dp)
-            .clickable(openEvent(context, upcoming))
+            .clickable(WidgetActions.openEvent(context, event.id))
             .background(GlanceTheme.colors.surfaceVariant)
             .cornerRadius(14.dp)
             .padding(10.dp),
@@ -224,10 +213,10 @@ private fun EventRow(context: Context, upcoming: UpcomingEvent) {
     ) {
         Box(
             modifier = GlanceModifier
-                .background(eventColor)
+                .background(eventColorProvider(event))
                 .cornerRadius(3.dp)
                 .width(4.dp)
-                .height(34.dp)
+                .height(38.dp)
         ) { }
         Spacer(GlanceModifier.width(10.dp))
         Column(modifier = GlanceModifier.defaultWeight()) {
@@ -238,27 +227,42 @@ private fun EventRow(context: Context, upcoming: UpcomingEvent) {
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 ),
-                maxLines = 2
+                maxLines = 1
             )
-            if (event.location.isNotBlank()) {
-                Spacer(GlanceModifier.height(2.dp))
-            }
+            Spacer(GlanceModifier.height(2.dp))
             Text(
                 text = timeText(upcoming),
                 style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp),
                 maxLines = 1
             )
+            if (event.location.isNotBlank()) {
+                Spacer(GlanceModifier.height(1.dp))
+                Text(
+                    text = event.location,
+                    style = TextStyle(
+                        color = GlanceTheme.colors.onSurfaceVariant,
+                        fontSize = 10.sp
+                    ),
+                    maxLines = 1
+                )
+            }
         }
     }
 }
 
+/**
+ * "Today · 2:30 PM · ↻", "Tomorrow · All day", "Mon, Sep 8 · 9:00 AM".
+ * Uses the concrete occurrence start, so recurring events show the upcoming
+ * time rather than the original DTSTART; all-day occurrences show "All day".
+ */
 private fun timeText(upcoming: UpcomingEvent): String {
     val event = upcoming.event
-    val day = SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(upcoming.occurrenceStart))
+    val day = WidgetFormat.friendlyDay(upcoming.occurrenceStart)
     return if (event.isAllDay) {
         "$day · All day"
     } else {
-        val time = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(upcoming.occurrenceStart))
+        val time = SimpleDateFormat("h:mm a", Locale.getDefault())
+            .format(Date(upcoming.occurrenceStart))
         val repeatSuffix = if (DateTimeUtils.effectiveRrule(event) != null) " · ↻" else ""
         "$day · $time$repeatSuffix"
     }

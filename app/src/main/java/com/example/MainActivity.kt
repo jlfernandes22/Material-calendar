@@ -11,7 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import android.util.Log
 import com.example.notification.NotificationHelper
 import com.example.notification.ReminderScheduler
 import com.example.ui.MainScreen
@@ -66,10 +65,16 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun handleWidgetIntent() {
-    Log.d("MCAL", "intent=${intent} extras=${intent?.extras}")
     intent?.let {
       if (it.getBooleanExtra("create_event", false)) {
-        calendarViewModel.openCreateEventDialog()
+        val title = it.getStringExtra("create_title")
+        val category = it.getStringExtra("create_category")
+        val minutes = it.getIntExtra("create_minutes", 60)
+        calendarViewModel.openCreateEventDialog(
+          title = title,
+          category = category,
+          durationMinutes = minutes
+        )
       } else if (it.hasExtra("event_id")) {
         val id = it.getLongExtra("event_id", -1L)
         if (id > 0L) calendarViewModel.openEventById(id)
@@ -80,6 +85,12 @@ class MainActivity : ComponentActivity() {
             calendarViewModel.setSelectedDate(cal)
             calendarViewModel.setViewMode(com.example.ui.viewmodel.CalendarViewMode.DAY)
           }
+        }
+      } else if (it.hasExtra("view_mode")) {
+        when (it.getStringExtra("view_mode")) {
+          "agenda" -> calendarViewModel.setViewMode(com.example.ui.viewmodel.CalendarViewMode.SCHEDULE)
+          "month" -> calendarViewModel.setViewMode(com.example.ui.viewmodel.CalendarViewMode.MONTH)
+          else -> {}
         }
       }
     }

@@ -17,4 +17,10 @@
     <string name="widget_next_events_description">Your next upcoming calendar events at a glance</string>
     <string name="widget_month_title">Local Calendar · Month</string>
     <string name="widget_month_description">A compact month grid for your calendar</string>
+    <string name="widget_quick_actions_title">Local Calendar · Quick Actions</string>
+    <string name="widget_quick_actions_description">One-tap event templates and shortcuts into the app</string>
+    <string name="widget_week_horizon_title">Local Calendar · 7-Day Horizon</string>
+    <string name="widget_week_horizon_description">The next seven days with event dots, tappable per day</string>
+    <string name="widget_time_allocation_title">Local Calendar · Time Allocation</string>
+    <string name="widget_time_allocation_description">How your scheduled time splits across categories this week</string>
 </resources>

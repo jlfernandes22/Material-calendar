@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Privacy-first backup policy.
-
-    Calendar data must NEVER leave the device through Google's automatic cloud
-    backup (Google One / Android Backup Service). Users control their own backups
-    via the in-app JSON / .ics export, which goes wherever they choose.
-
-    Device-to-device transfer (migrating to a new phone over a local, encrypted
-    channel) is allowed so switching phones does not silently lose data.
+    Privacy hardening (Android 12+ data extraction rules).
+    Cloud backup and device-to-device transfer are disabled at the manifest level
+    (android:allowBackup="false"). These explicit exclusions act as a second line
+    of defense if backup is ever re-enabled: the local calendar database must never
+    leave the device except through the user-initiated JSON / iCal export.
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="database" path="local_calendar_db" />
         <exclude domain="database" path="local_calendar_db-wal" />
         <exclude domain="database" path="local_calendar_db-shm" />
+        <exclude domain="sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
-        <include domain="database" path="local_calendar_db" />
-        <include domain="database" path="local_calendar_db-wal" />
-        <include domain="database" path="local_calendar_db-shm" />
+        <exclude domain="database" path="local_calendar_db" />
+        <exclude domain="database" path="local_calendar_db-wal" />
+        <exclude domain="database" path="local_calendar_db-shm" />
+        <exclude domain="sharedpref" path="." />
     </device-transfer>
 </data-extraction-rules>

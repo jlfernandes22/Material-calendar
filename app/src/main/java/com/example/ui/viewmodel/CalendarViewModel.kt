@@ -245,15 +245,21 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     }
 
     // Event operations
-    fun openCreateEventDialog(prefilledStartMillis: Long? = null) {
+    fun openCreateEventDialog(
+        prefilledStartMillis: Long? = null,
+        title: String? = null,
+        category: String? = null,
+        durationMinutes: Int = 60
+    ) {
         val start = prefilledStartMillis ?: _selectedDate.value.timeInMillis
         val defaultCal = uiState.value.calendars.firstOrNull()?.id ?: 1L
 
         _editingEvent.value = EventEntity(
             calendarId = defaultCal,
-            title = "",
+            title = title ?: "",
+            category = category ?: "General",
             startMillis = start,
-            endMillis = start + 3600_000L,
+            endMillis = start + durationMinutes * 60_000L,
             isAllDay = false
         )
         _isEventDialogOpen.value = true

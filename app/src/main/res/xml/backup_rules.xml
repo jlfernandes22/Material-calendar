@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Full backup rules (Android 8-11). The calendar database is excluded from
-    automatic backups: privacy-first means the only backup is the explicit,
-    user-controlled JSON / .ics export. Reminders are re-scheduled automatically
-    on app start, so excluding the scheduler database is safe.
+    Privacy hardening (pre-Android 12 full backup rules).
+    Auto-backup is disabled at the manifest level (android:allowBackup="false").
+    These explicit exclusions act as a second line of defense if backup is ever
+    re-enabled: the local calendar database must never leave the device except
+    through the user-initiated JSON / iCal export.
 -->
 <full-backup-content>
     <exclude domain="database" path="local_calendar_db" />
     <exclude domain="database" path="local_calendar_db-wal" />
     <exclude domain="database" path="local_calendar_db-shm" />
+    <exclude domain="sharedpref" path="." />
 </full-backup-content>
