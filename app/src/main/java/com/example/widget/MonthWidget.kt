@@ -192,7 +192,7 @@ private fun MonthContent(
     val rowsShown = minOf(weeksNeeded, rowsFit)
 
     // Footer only when the whole grid already fits and space remains for it.
-    val leftover = availNoFooter - rowsShown * rowHeight
+    val leftover = availNoFooter - rowHeight * rowsShown
     val showFooter = wantFooter && rowsShown == weeksNeeded && leftover >= 44.dp
     val maxFooterEvents = if (size.width >= 340.dp) 3 else 2
     val footerMaxEvents = (((leftover - 28.dp) / 17.dp).toInt()).coerceIn(0, maxFooterEvents)
