@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -42,6 +43,8 @@ import java.util.Locale
  * Merge of the two branches, keeping the best of each:
  * - Recurring events are expanded to their next concrete occurrences (not the
  *   stale DTSTART from months ago); duration is preserved per occurrence.
+ * - Rows are sorted by occurrence time and the list is capped to what fits the
+ *   placed height, so no row is ever clipped mid-text.
  * - Rows deep-link to the event details sheet, "+ New" opens the editor
  *   directly via the shared [WidgetActions] contract.
  * - Friendly day labels: Today / Tomorrow / weekday+date.
@@ -104,12 +107,23 @@ private suspend fun loadUpcomingEvents(context: Context): List<UpcomingEvent> {
         if (upcoming.size > 60) break
     }
 
-    upcoming.sortedBy { it.occurrenceStart }.take(20)
-    return upcoming
+    // IMPORTANT: sortedBy returns a new list - it must actually be returned.
+    return upcoming.sortedBy { it.occurrenceStart }.take(20)
 }
 
 @Composable
 private fun FutureEventsContent(context: Context, events: List<UpcomingEvent>) {
+    // Height-aware row budget: header ≈ 36dp; a row costs ≈ 56dp, +14dp when it
+    // shows a location line. Only rows that fully fit are passed on, so the
+    // widget never clips a row mid-text.
+    val budget = LocalSize.current.height - 36.dp
+    var used = 0.dp
+    val visible = events.takeWhile { upcoming ->
+        val cost = 56.dp + if (upcoming.event.location.isNotBlank()) 14.dp else 0.dp
+        if (used + cost <= budget) { used += cost; true } else false
+    }
+    val shown = if (visible.isEmpty()) events.take(1) else visible
+
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -120,7 +134,7 @@ private fun FutureEventsContent(context: Context, events: List<UpcomingEvent>) {
         Header(context)
         Spacer(GlanceModifier.height(6.dp))
 
-        if (events.isEmpty()) {
+        if (shown.isEmpty()) {
             Box(
                 modifier = GlanceModifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -148,7 +162,7 @@ private fun FutureEventsContent(context: Context, events: List<UpcomingEvent>) {
             // Plain items(): several occurrences of one recurring event can be
             // listed, so a stable itemId per event would collide.
             LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                items(events) { upcoming ->
+                items(shown) { upcoming ->
                     EventRow(context, upcoming)
                 }
             }
@@ -204,11 +218,11 @@ private fun EventRow(context: Context, upcoming: UpcomingEvent) {
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 4.dp)
+            .padding(top = 3.dp, bottom = 3.dp)
             .clickable(WidgetActions.openEvent(context, event.id))
             .background(GlanceTheme.colors.surfaceVariant)
             .cornerRadius(14.dp)
-            .padding(10.dp),
+            .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -216,7 +230,7 @@ private fun EventRow(context: Context, upcoming: UpcomingEvent) {
                 .background(eventColorProvider(event))
                 .cornerRadius(3.dp)
                 .width(4.dp)
-                .height(38.dp)
+                .height(32.dp)
         ) { }
         Spacer(GlanceModifier.width(10.dp))
         Column(modifier = GlanceModifier.defaultWeight()) {

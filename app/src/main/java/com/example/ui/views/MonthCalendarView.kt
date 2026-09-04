@@ -1,8 +1,11 @@
 package com.example.ui.views
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,9 +69,7 @@ fun MonthCalendarView(
     onAddEventForDate: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val monthDays = remember(selectedDate.get(Calendar.MONTH), selectedDate.get(Calendar.YEAR)) {
-        DateTimeUtils.generateMonthDays(selectedDate)
-    }
+    val monthKey = selectedDate.get(Calendar.YEAR) * 12 + selectedDate.get(Calendar.MONTH)
 
     val dayNames = listOf("S", "M", "T", "W", "T", "F", "S")
 
@@ -97,41 +98,52 @@ fun MonthCalendarView(
             }
         }
 
-        // Month Grid Container (Surface card)
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(6.dp)) {
-                monthDays.chunked(7).forEach { week ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        week.forEach { day ->
-                            val isSelected = DateTimeUtils.isSameDay(day.calendar, selectedDate)
-                            val dayEvents = filteredEvents.filter {
-                                DateTimeUtils.eventOccursOnDay(
-                                    it,
-                                    DateTimeUtils.getStartOfDay(day.calendar),
-                                    DateTimeUtils.getEndOfDay(day.calendar)
+        // Month Grid Container (Surface card) - crossfades when the month changes
+        // (via swipe, chevrons or the date picker)
+        AnimatedContent(
+            targetState = monthKey,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(180)) togetherWith
+                    fadeOut(animationSpec = tween(180))
+            },
+            label = "month_grid_transition"
+        ) { key ->
+            val days = remember(key) { DateTimeUtils.generateMonthDays(selectedDate) }
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(6.dp)) {
+                    days.chunked(7).forEach { week ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceAround
+                        ) {
+                            week.forEach { day ->
+                                val isSelected = DateTimeUtils.isSameDay(day.calendar, selectedDate)
+                                val dayEvents = filteredEvents.filter {
+                                    DateTimeUtils.eventOccursOnDay(
+                                        it,
+                                        DateTimeUtils.getStartOfDay(day.calendar),
+                                        DateTimeUtils.getEndOfDay(day.calendar)
+                                    )
+                                }
+
+                                MonthDayCell(
+                                    day = day,
+                                    isSelected = isSelected,
+                                    events = dayEvents,
+                                    calendars = calendars,
+                                    onClick = { onSelectDate(day.calendar) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
                                 )
                             }
-
-                            MonthDayCell(
-                                day = day,
-                                isSelected = isSelected,
-                                events = dayEvents,
-                                calendars = calendars,
-                                onClick = { onSelectDate(day.calendar) },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1f)
-                            )
                         }
                     }
                 }

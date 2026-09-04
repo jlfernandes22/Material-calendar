@@ -102,7 +102,10 @@ private fun WeekHorizonContent(
             .fillMaxSize()
             .background(GlanceTheme.colors.surface)
             .cornerRadius(24.dp)
-            .padding(horizontal = 8.dp, vertical = 10.dp)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        // Center the strip vertically so taller placements don't leave all the
+        // empty space hanging below the days.
+        verticalAlignment = Alignment.CenterVertically
     ) {
         weekDays.forEachIndexed { index, day ->
             DayColumn(

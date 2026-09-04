@@ -154,17 +154,42 @@ private fun TimeAllocationContent(
         Spacer(GlanceModifier.height(10.dp))
 
         if (top.isEmpty()) {
+            // Compact centered empty state: no stranded header, no dead space.
             Box(
                 modifier = GlanceModifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Add timed events to see your week",
-                    style = TextStyle(
-                        color = GlanceTheme.colors.onSurfaceVariant,
-                        fontSize = 12.sp
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "THIS WEEK",
+                        style = TextStyle(
+                            color = GlanceTheme.colors.primary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        maxLines = 1
                     )
-                )
+                    Spacer(GlanceModifier.height(4.dp))
+                    Text(
+                        text = if (totalMillis > 0) "${WidgetFormat.duration(totalMillis)} planned"
+                        else "Nothing planned",
+                        style = TextStyle(
+                            color = GlanceTheme.colors.onSurface,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        maxLines = 1
+                    )
+                    Spacer(GlanceModifier.height(2.dp))
+                    Text(
+                        text = "Add timed events to see your week",
+                        style = TextStyle(
+                            color = GlanceTheme.colors.onSurfaceVariant,
+                            fontSize = 10.sp
+                        ),
+                        maxLines = 1
+                    )
+                }
             }
         } else {
             top.forEach { (category, millis) ->

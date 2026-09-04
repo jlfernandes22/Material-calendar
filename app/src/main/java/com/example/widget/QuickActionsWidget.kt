@@ -94,11 +94,16 @@ private fun QuickActionsContent(context: Context) {
             .fillMaxSize()
             .background(GlanceTheme.colors.surface)
             .cornerRadius(20.dp)
-            .padding(10.dp)
+            .padding(10.dp),
+        // No template rows: center the nav chips vertically. Otherwise keep the
+        // nav row on top and distribute the template rows in the space below
+        // (Glance has no Arrangement - flexible Spacers do the spreading).
+        verticalAlignment = if (templateRows.isEmpty()) Alignment.CenterVertically
+        else Alignment.Top
     ) {
         NavigationRow(context, showAgenda)
         templateRows.forEach { rowTemplates ->
-            Spacer(GlanceModifier.height(8.dp))
+            Spacer(GlanceModifier.defaultWeight())
             Row(
                 modifier = GlanceModifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.Start
@@ -108,6 +113,9 @@ private fun QuickActionsContent(context: Context) {
                     TemplateChip(context, template)
                 }
             }
+        }
+        if (templateRows.isNotEmpty()) {
+            Spacer(GlanceModifier.defaultWeight())
         }
     }
 }
